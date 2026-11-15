@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الكسبان على الأرض - شطرنج</title>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <style>
+        :root {
+            --bg: #161512;
+            --card: #262421;
+            --primary: #81b64c;
+            --primary-hover: #95cc5c;
+            --gold: #f5b041;
+            --text: #ffffff;
+            --muted: #bababa;
+        }
+        * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg); color: var(--text); margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 480px; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); text-align: center; }
+        h1, h2, h3 { margin-top: 0; }
+        .gold-text { color: var(--gold); }
+        input, select, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: none; font-size: 16px; }
+        input { background: #383531; color: white; text-align: center; }
+        button { background: var(--primary); color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: var(--primary-hover); }
+        button.secondary { background: #383531; }
+        .hidden { display: none !important; }
+        #board { width: 100%; max-width: 400px; margin: 10px auto; direction: ltr; }
+        .player-bar { display: flex; justify-content: space-between; align-items: center; background: #1e1c19; padding: 10px 15px; border-radius: 8px; margin: 5px 0; }
+        .badge { background: var(--gold); color: #000; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+        .rating { color: var(--muted); font-size: 14px; }
+        .queue-list { text-align: right; max-height: 150px; overflow-y: auto; background: #1e1c19; padding: 10px; border-radius: 8px; }
+        .queue-item { padding: 6px 0; border-bottom: 1px solid #333; display: flex; justify-content: space-between; }
+        .timer-box { font-size: 28px; font-weight: bold; color: var(--gold); margin: 10px 0; }
+        .victory-screen { background: linear-gradient(135deg, #262421, #3d2c10); border: 2px solid var(--gold); padding: 30px 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="home-screen" class="card">
+        <h1 class="gold-text">👑 الكسبان على الأرض</h1>
+        <p style="color: var(--muted);">نظام البقاء للأقوى: افُز بـ 3 مباريات متتالية لتنتزع اللقب!</p>
+        <label>مدة الانتظار قبل بدء المسابقة (بالدقائق):</label>
+        <input type="number" id="wait-minutes" value="2" min="1" max="30">
+        <button onclick="createRoom()">إنشاء مسابقة جديدة</button>
+    </div>
+
+    <div id="join-screen" class="card hidden">
+        <h2>الدخول إلى المسابقة</h2>
+        <p style="color: var(--muted); font-size: 14px;">أدخل اسم حسابك في Chess.com لجلب تقييمك تلقائياً</p>
+        <input type="text" id="chess-username" placeholder="اسم المستخدم في Chess.com">
+        <button id="join-btn" onclick="joinRoom()">دخول قائمة الانتظار</button>
+        <button class="secondary" onclick="watchOnly()">مشاهدة فقط</button>
+        <p id="join-error" style="color: #ff6b6b; font-size: 14px;"></p>
+    </div>
+
+    <div id="room-screen" class="hidden">
+        <div class="card" style="padding: 12px;">
+            <button class="secondary" style="margin:0; padding:8px; font-size:14px;" onclick="copyLink()">🔗 نسخ رابط المسابقة لمشاركته</button>
+        </div>
+
+        <div id="finished-screen" class="card victory-screen hidden">
+            <div style="font-size: 50px;">🏆</div>
+            <h2>انتهت المسابقة!</h2>
+            <h1 class="gold-text" id="winner-announcement">الكسبان على الأرض هو ...</h1>
+            <button onclick="location.href=location.pathname">بدء مسابقة جديدة</button>
+        </div>
+
+        <div id="status-card" class="card">
+            <h3 id="status-title">في انتظار اللاعبين...</h3>
+            <div class="timer-box" id="timer-display">00:00</div>
+            <p id="status-desc" style="color: var(--muted); font-size: 14px;"></p>
+        </div>
+
+        <div id="game-area" class="card hidden">
+            <div class="player-bar">
+                <div><span id="opponent-name">الخصم</span> <span class="rating" id="opponent-rating"></span></div>
+                <span class="badge" style="background:#555; color:white;">المتحدي</span>
+            </div>
+
+            <div id="board"></div>
+
+            <div class="player-bar">
+                <div><span id="king-name" class="gold-text" style="font-weight:bold;">الملك</span> <span class="rating" id="king-rating"></span></div>
+                <span class="badge">👑 الكسبان (<span id="king-streak">0</span>/3)</span>
+            </div>
+            
+            <button id="resign-btn" class="secondary hidden" style="background:#8a2be2; margin-top:10px;" onclick="resignGame()">انسحاب من المباراة</button>
+        </div>
+
+        <div class="card">
+            <h3>اللاعبون في الانتظار (<span id="queue-count">0</span>)</h3>
+            <div class="queue-list" id="queue-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const firebaseConfig = {
+        databaseURL: "https://kasban-e8755-default-rtdb.europe-west1.firebasedatabase.app/" 
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+    let myPlayer = JSON.parse(localStorage.getItem('chess_king_user') || 'null');
+    let board = null;
+    let game = new Chess();
+    let roomData = null;
+    let timerInterval = null;
+
+    if (roomId) {
+        document.getElementById('home-screen').classList.add('hidden');
+        if (myPlayer && myPlayer.roomId === roomId) {
+            enterRoom();
+        } else {
+            document.getElementById('join-screen').classList.remove('hidden');
+        }
+    }
+
+    function createRoom() {
+        const mins = parseInt(document.getElementById('wait-minutes').value) || 2;
+        const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const startTime = Date.now() + (mins * 60 * 1000);
+
+        db.ref('rooms/' + newRoomId).set({
+            status: 'waiting',
+            nextEventTime: startTime,
+            king: null,
+            opponent: null,
+            streak: 0,
+            fen: 'start',
+            players: {}
+        }).then(() => {
+            window.location.search = '?room=' + newRoomId;
+        });
+    }
+
+    async function joinRoom() {
+        const username = document.getElementById('chess-username').value.trim().toLowerCase();
+        const errEl = document.getElementById('join-error');
+        const btn = document.getElementById('join-btn');
+        
+        if (!username) return errEl.innerText = "يرجى كتابة اسم المستخدم";
+        btn.disabled = true;
+        btn.innerText = "جاري جلب التقييم من Chess.com...";
+        errEl.innerText = "";
+
+        try {
+            const res = await fetch(`https://api.chess.com/pub/player/${username}/stats`);
+            if (!res.ok) throw new Error("لم يتم العثور على الحساب في Chess.com");
+            const data = await res.json();
+            
+            const rating = data.chess_rapid?.last?.rating || 
+                           data.chess_blitz?.last?.rating || 
+                           data.chess_bullet?.last?.rating || 800;
+
+            myPlayer = { username, rating, roomId, isSpectator: false };
+            localStorage.setItem('chess_king_user', JSON.stringify(myPlayer));
+
+            await db.ref(`rooms/${roomId}/players/${username}`).set({
+                username, rating, joinedAt: Date.now()
+            });
+
+            enterRoom();
+        } catch (e) {
+            errEl.innerText = e.message;
+            btn.disabled = false;
+            btn.innerText = "دخول قائمة الانتظار";
+        }
+    }
+
+    function watchOnly() {
+        myPlayer = { username: 'مشاهد_' + Math.floor(Math.random()*1000), rating: 0, roomId, isSpectator: true };
+        enterRoom();
+    }
+
+    function enterRoom() {
+        document.getElementById('join-screen').classList.add('hidden');
+        document.getElementById('room-screen').classList.remove('hidden');
+        initBoard();
+        listenToRoom();
+    }
+
+    function copyLink() {
+        navigator.clipboard.writeText(window.location.href);
+        alert("تم نسخ الرابط! أرسله للاعبين الآن.");
+    }
+
+    function initBoard() {
+        board = Chessboard('board', {
+            draggable: true,
+            position: 'start',
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+            onDragStart: (source, piece) => {
+                if (!roomData || roomData.status !== 'playing') return false;
+                if (game.game_over()) return false;
+                const isKing = myPlayer.username === roomData.king?.username;
+                const isOpp = myPlayer.username === roomData.opponent?.username;
+                if (game.turn() === 'w' && !isKing) return false;
+                if (game.turn() === 'b' && !isOpp) return false;
+                if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                    (game.turn() === 'b' && piece.search(/^w/) !== -1)) return false;
+            },
+            onDrop: (source, target) => {
+                const move = game.move({ from: source, to: target, promotion: 'q' });
+                if (move === null) return 'snapback';
+                
+                db.ref(`rooms/${roomId}/fen`).set(game.fen());
+                checkGameEnd();
+            }
+        });
+    }
+
+    function listenToRoom() {
+        db.ref('rooms/' + roomId).on('value', (snap) => {
+            roomData = snap.val();
+            if (!roomData) return;
+
+            updateQueueUI(roomData.players || {});
+            handleRoomStates(roomData);
+        });
+    }
+
+    function updateQueueUI(playersObj) {
+        const list = document.getElementById('queue-list');
+        list.innerHTML = '';
+        const players = Object.values(playersObj);
+        document.getElementById('queue-count').innerText = players.length;
+
+        players.forEach(p => {
+            if (roomData.king?.username === p.username || roomData.opponent?.username === p.username) return;
+            list.innerHTML += `<div class="queue-item"><span>${p.username}</span> <span class="rating">(${p.rating})</span></div>`;
+        });
+    }
+
+    function handleRoomStates(data) {
+        clearInterval(timerInterval);
+
+        const statusCard = document.getElementById('status-card');
+        const gameArea = document.getElementById('game-area');
+        const finishedScreen = document.getElementById('finished-screen');
+        const resignBtn = document.getElementById('resign-btn');
+
+        if (data.status === 'finished') {
+            statusCard.classList.add('hidden');
+            gameArea.classList.add('hidden');
+            finishedScreen.classList.remove('hidden');
+            document.getElementById('winner-announcement').innerText = `الكسبان على الأرض هو "${data.king.username}"`;
+            return;
+        }
+
+        if (data.status === 'waiting' || data.status === 'rest') {
+            statusCard.classList.remove('hidden');
+            gameArea.classList.add('hidden');
+            
+            document.getElementById('status-title').innerText = data.status === 'waiting' 
+                ? "العد التنازلي لبدء المسابقة" 
+                : `استراحة 20 ثانية - الكسبان الحالي: ${data.king?.username} (${data.streak}/3)`;
+            
+            document.getElementById('status-desc').innerText = data.status === 'waiting'
+                ? "سيتم اختيار الكسبان على الأرض عشوائياً عند انتهاء الوقت"
+                : "يتم تجهيز الخصم التالي حسب مستوى الصعوبة...";
+
+            timerInterval = setInterval(() => {
+                const left = Math.max(0, Math.ceil((data.nextEventTime - Date.now()) / 1000));
+                const m = String(Math.floor(left / 60)).padStart(2, '0');
+                const s = String(left % 60).padStart(2, '0');
+                document.getElementById('timer-display').innerText = `${m}:${s}`;
+
+                if (left === 0) {
+                    clearInterval(timerInterval);
+                    triggerNextMatch();
+                }
+            }, 500);
+        }
+
+        if (data.status === 'playing') {
+            statusCard.classList.add('hidden');
+            gameArea.classList.remove('hidden');
+
+            document.getElementById('king-name').innerText = data.king.username;
+            document.getElementById('king-rating').innerText = `(${data.king.rating})`;
+            document.getElementById('king-streak').innerText = data.streak;
+
+            document.getElementById('opponent-name').innerText = data.opponent.username;
+            document.getElementById('opponent-rating').innerText = `(${data.opponent.rating})`;
+
+            if (myPlayer.username === data.opponent.username) {
+                board.orientation('black');
+            } else {
+                board.orientation('white');
+            }
+
+            if (myPlayer.username === data.king.username || myPlayer.username === data.opponent.username) {
+                resignBtn.classList.remove('hidden');
+            } else {
+                resignBtn.classList.add('hidden');
+            }
+
+            if (data.fen && data.fen !== game.fen()) {
+                game.load(data.fen === 'start' ? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : data.fen);
+                board.position(game.fen());
+            }
+        }
+    }
+
+    function triggerNextMatch() {
+        const players = Object.values(roomData.players || {});
+        if (players.length < 2) {
+            alert("يجب وجود لاعبين على الأقل لبدء المباراة! تم تمديد الانتظار 30 ثانية.");
+            db.ref(`rooms/${roomId}/nextEventTime`).set(Date.now() + 30000);
+            return;
+        }
+        if (myPlayer.username !== players[0].username && !myPlayer.isSpectator) return;
+
+        let king = roomData.king;
+        let streak = roomData.streak || 0;
+
+        if (!king) {
+            king = players[Math.floor(Math.random() * players.length)];
+            streak = 0;
+        }
+
+        const availableOpponents = players.filter(p => p.username !== king.username);
+        let chosenOpponent = null;
+
+        if (streak === 0) {
+            chosenOpponent = availableOpponents[Math.floor(Math.random() * availableOpponents.length)];
+        } 
+        else if (streak === 1) {
+            chosenOpponent = availableOpponents.reduce((prev, curr) => 
+                Math.abs(curr.rating - king.rating) < Math.abs(prev.rating - king.rating) ? curr : prev
+            );
+        } 
+        else if (streak === 2) {
+            const hardPool = availableOpponents.filter(p => (p.rating - king.rating) >= 200 && (p.rating - king.rating) <= 600);
+            if (hardPool.length > 0) {
+                chosenOpponent = hardPool[Math.floor(Math.random() * hardPool.length)];
+            } else {
+                chosenOpponent = availableOpponents.reduce((prev, curr) => curr.rating > prev.rating ? curr : prev);
+            }
+        }
+
+        db.ref(`rooms/${roomId}`).update({
+            status: 'playing',
+            king: king,
+            opponent: chosenOpponent,
+            streak: streak,
+            fen: 'start'
+        });
+    }
+
+    function checkGameEnd() {
+        if (!game.game_over()) return;
+
+        let kingWon = false;
+        if (game.in_checkmate()) {
+            kingWon = (game.turn() === 'b');
+        } else {
+            alert("تعادل! ستعاد الجولة بعد 20 ثانية.");
+            db.ref(`rooms/${roomId}`).update({
+                status: 'rest',
+                nextEventTime: Date.now() + 20000
+            });
+            return;
+        }
+
+        processMatchResult(kingWon);
+    }
+
+    function resignGame() {
+        if (!confirm("هل أنت متأكد من الانسحاب؟")) return;
+        const amIKing = (myPlayer.username === roomData.king.username);
+        processMatchResult(!amIKing);
+    }
+
+    function processMatchResult(kingWon) {
+        if (kingWon) {
+            const newStreak = (roomData.streak || 0) + 1;
+            if (newStreak >= 3) {
+                db.ref(`rooms/${roomId}`).update({
+                    status: 'finished',
+                    streak: 3
+                });
+            } else {
+                db.ref(`rooms/${roomId}`).update({
+                    status: 'rest',
+                    streak: newStreak,
+                    nextEventTime: Date.now() + 20000
+                });
+            }
+        } else {
+            db.ref(`rooms/${roomId}`).update({
+                status: 'rest',
+                king: roomData.opponent,
+                opponent: null,
+                streak: 0,
+                nextEventTime: Date.now() + 20000
+            });
+        }
+    }
+</script>
+</body>
+</html>
